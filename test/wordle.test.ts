@@ -15,9 +15,14 @@ const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
 // Step 1: a generator for five-letter uppercase words.
 const wordFrom = (letters: string) =>
   fc.array(fc.constantFrom(...letters), { minLength: 5, maxLength: 5 }).map(cs => cs.join(''));
-const word = wordFrom(ALPHABET);
+
+// ABC makes repeated letters common, which count bugs need.
+// The full alphabet still shows up: with only ABC the secret usually
+// contains every letter, so a guess letter missing from the secret is rare.
+const word = fc.oneof(wordFrom('ABC'), wordFrom(ALPHABET));
 
 describe('matchGuess', () => {
+  // Pattern: invariant. The result always has exactly five colors.
   it('returns exactly five colors', () => {
     fc.assert(
       fc.property(word, word, (secret, guess) => {
@@ -25,6 +30,8 @@ describe('matchGuess', () => {
       }),
     );
   });
+
+  // Pattern: invariant. Every color is G, Y, or B.
   it('only uses the colors G, Y, B', () => {
     fc.assert(
       fc.property(word, word, (secret, guess) => {
@@ -32,6 +39,8 @@ describe('matchGuess', () => {
       }),
     );
   });
+
+  // Pattern: conditional. Guessing the secret gives all greens.
   it('guessing the secret gives all greens', () => {
     fc.assert(
       fc.property(word, w => {
@@ -39,6 +48,8 @@ describe('matchGuess', () => {
       }),
     );
   });
+
+  // Pattern: invariant. A letter is never credited more times than the secret contains it.
   it('never credits a letter more times than the secret contains it', () => {
     fc.assert(
       fc.property(word, word, (secret, guess) => {
@@ -48,6 +59,34 @@ describe('matchGuess', () => {
           const inSecret = [...secret].filter(c => c === letter).length;
           expect(credited).toBeLessThanOrEqual(inSecret);
         }
+      }),
+    );
+  });
+
+  // Pattern: invariant. Each letter is credited exactly min(times in guess, times in secret).
+  it('credits each letter as many times as the counts allow', () => {
+    fc.assert(
+      fc.property(word, word, (secret, guess) => {
+        const result = matchGuess(secret, guess);
+        for (const letter of new Set(guess)) {
+          const credited = [...guess].filter((c, i) => c === letter && result[i] !== 'B').length;
+          const inGuess = [...guess].filter(c => c === letter).length;
+          const inSecret = [...secret].filter(c => c === letter).length;
+          expect(credited).toBe(Math.min(inGuess, inSecret));
+        }
+      }),
+    );
+  });
+
+  // Pattern: metamorphic. Renaming letters in both words the same way keeps the colors.
+  it('renaming letters in both words keeps the colors', () => {
+    const renaming = fc
+      .shuffledSubarray([...ALPHABET], { minLength: ALPHABET.length, maxLength: ALPHABET.length })
+      .map(letters => letters.join(''));
+    fc.assert(
+      fc.property(word, word, renaming, (secret, guess, perm) => {
+        const rename = (w: string) => [...w].map(c => perm[c.charCodeAt(0) - 65]).join('');
+        expect(matchGuess(rename(secret), rename(guess))).toEqual(matchGuess(secret, guess));
       }),
     );
   });
